@@ -1,0 +1,801 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <div class="jumbotron">
+        <div class="container">
+            <h1>Storyline Map</h1>
+            <p>Your current progress through the CTF storyline - only active and completed challenges are shown</p>
+        </div>
+    </div>
+
+<div class="container">
+    <div class="row">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header">
+                    <h3>Your Active Storyline Progress</h3>
+                    <div class="legend mt-2">
+                        <span class="badge badge-success">Completed</span>
+                        <span class="badge badge-warning">Available Now</span>
+                        <span class="badge badge-danger">Time Limited</span>
+                        <small class="text-muted ml-3">💡 Locked challenges are hidden until unlocked</small>
+                        <button id="refresh-graph" class="btn btn-outline-primary btn-sm ml-3" onclick="location.reload()">
+                            🔄 Refresh Graph
+                        </button>
+
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div id="graph-container" style="height: 800px; border: 1px solid #ddd;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row mt-3">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5>Progress Statistics</h5>
+                </div>
+                <div class="card-body">
+                    <div id="progress-stats"></div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5>Available Challenges</h5>
+                </div>
+                <div class="card-body">
+                    <div id="available-challenges"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- No modal needed - redirecting to main challenges page -->
+
+<script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+<script>
+// Global variables
+let graphData = null;
+
+// Challenge Modal Functions - Redirect to main challenges page with auto-open
+function loadChallengeModal(challengeId) {
+    console.log('Redirecting to main challenges page for challenge ID:', challengeId);
+    
+    if (!graphData) {
+        console.error('Graph data not loaded yet');
+        // Fallback: redirect without hash
+        window.location.href = `/challenges`;
+        return;
+    }
+    
+    // Get challenge info to build the redirect URL
+    const node = graphData.nodes.find(n => n.id === challengeId);
+    if (node) {
+        // Redirect to main challenges page with hash to auto-open the challenge
+        // Format: /challenges#category-challengeId
+        const category = node.category || 'General';
+        const hash = `${category.replace(/ /g, '-')}-${challengeId}`;
+        
+        console.log('Redirecting to:', `/challenges#${hash}`);
+        window.location.href = `/challenges#${hash}`;
+    } else {
+        console.error('Challenge node not found for ID:', challengeId);
+        // Fallback: redirect to challenges page without hash
+        window.location.href = `/challenges`;
+    }
+}
+
+
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Graph data from backend - make it global
+    graphData = {{ graph_data | safe }};
+    
+    // Debug: Redirect functions
+    console.log('Redirect functions available:', {
+        loadChallengeModal: typeof loadChallengeModal
+    });
+    
+    console.log('Graph data loaded:', graphData ? 'Yes' : 'No');
+    if (graphData) {
+        console.log('Nodes count:', graphData.nodes.length);
+        console.log('Edges count:', graphData.edges.length);
+    }
+    
+    // Debug: Check for duplicate nodes
+    const nodeIds = graphData.nodes.map(n => n.id);
+    const duplicateIds = nodeIds.filter((id, index) => nodeIds.indexOf(id) !== index);
+    if (duplicateIds.length > 0) {
+        console.warn('Duplicate node IDs found:', duplicateIds);
+        // Remove duplicates
+        const uniqueNodes = [];
+        const seenIds = new Set();
+        graphData.nodes.forEach(node => {
+            if (!seenIds.has(node.id)) {
+                uniqueNodes.push(node);
+                seenIds.add(node.id);
+            }
+        });
+        graphData.nodes = uniqueNodes;
+        console.log('Duplicates removed, unique nodes:', graphData.nodes.length);
+    }
+
+    // Calculate statistics for visible challenges only
+    const stats = {
+        visible: graphData.nodes.length,
+        solved: graphData.nodes.filter(n => n.status === 'solved').length,
+        available: graphData.nodes.filter(n => n.status === 'unlocked').length,
+        timed: graphData.nodes.filter(n => n.max_lifetime).length
+    };
+
+    // Display statistics
+    document.getElementById('progress-stats').innerHTML = `
+        <p><strong>Visible Challenges:</strong> ${stats.visible}</p>
+        <p><strong>Completed:</strong> ${stats.solved}</p>
+        <p><strong>Available Now:</strong> ${stats.available}</p>
+        <p><strong>Time Limited:</strong> ${stats.timed}</p>
+        <div class="progress">
+            <div class="progress-bar bg-success" style="width: ${stats.visible > 0 ? (stats.solved/stats.visible)*100 : 0}%"></div>
+        </div>
+        <small class="text-muted">${stats.visible > 0 ? Math.round((stats.solved/stats.visible)*100) : 0}% of Current Path Complete</small>
+        <hr>
+        <small class="text-info">💡 New challenges will appear as you progress!</small>
+    `;
+
+    // Display available challenges
+    const availableChallenges = graphData.nodes.filter(n => n.status === 'unlocked');
+    if (availableChallenges.length > 0) {
+        document.getElementById('available-challenges').innerHTML = availableChallenges.map(c =>
+            `<div class="mb-2">
+                <button onclick="loadChallengeModal(${c.id})" class="btn btn-outline-primary btn-sm w-100">
+                    ${c.label} (${c.value} pts)
+                </button>
+            </div>`
+        ).join('');
+    } else {
+        document.getElementById('available-challenges').innerHTML = '<p class="text-muted">No challenges available right now.</p>';
+    }
+
+    // Calculate hierarchical levels for proper positioning
+    function calculateNodeLevels(nodes, edges) {
+        const levelMap = new Map();
+        const predecessorMap = new Map();
+        
+        // Build predecessor map
+        edges.forEach(edge => {
+            predecessorMap.set(edge.to, edge.from);
+        });
+        
+        // Find root nodes (no predecessors)
+        const rootNodes = nodes.filter(node => !predecessorMap.has(node.id));
+        
+        // Set root nodes to level 0
+        rootNodes.forEach(node => {
+            levelMap.set(node.id, 0);
+        });
+        
+        // Calculate levels using BFS
+        const queue = [...rootNodes.map(n => n.id)];
+        const visited = new Set();
+        
+        while (queue.length > 0) {
+            const currentId = queue.shift();
+            if (visited.has(currentId)) continue;
+            visited.add(currentId);
+            
+            const currentLevel = levelMap.get(currentId) || 0;
+            
+            // Find all children of current node
+            const children = edges.filter(edge => edge.from === currentId);
+            children.forEach(edge => {
+                const childId = edge.to;
+                const childCurrentLevel = levelMap.get(childId);
+                const newLevel = currentLevel + 1;
+                
+                // Set child to the maximum level found (ensures proper hierarchy)
+                if (childCurrentLevel === undefined || childCurrentLevel < newLevel) {
+                    levelMap.set(childId, newLevel);
+                }
+                
+                if (!visited.has(childId)) {
+                    queue.push(childId);
+                }
+            });
+        }
+        
+        return levelMap;
+    }
+    
+    // Calculate levels for all nodes
+    const nodeLevels = calculateNodeLevels(graphData.nodes, graphData.edges);
+    
+    // Prepare data for vis.js with modern neon styling and proper levels
+    const nodes = new vis.DataSet(graphData.nodes.map(node => ({
+        id: node.id,
+        label: `${node.label}\n${node.value} pts`,
+        color: getNodeColor(node.status),
+        font: {
+            color: '#ffffff',
+            size: node.status === 'solved' ? 14 : 12,
+            face: 'Roboto, Arial, sans-serif',
+            strokeWidth: 2,
+            strokeColor: '#000000'
+        },
+        shape: node.max_lifetime ? 'diamond' : 'box',
+        margin: 12,
+        borderWidth: 3,
+        borderColor: getBorderColor(node.status),
+        shadow: {
+            enabled: true,
+            color: getBorderColor(node.status),
+            size: 15,
+            x: 0,
+            y: 0
+        },
+        borderWidthSelected: 4,
+        chosen: {
+            node: function(values, id, selected, hovering) {
+                values.shadow = true;
+                values.shadowSize = 20;
+                values.shadowColor = getBorderColor(graphData.nodes.find(n => n.id === id).status);
+            }
+        },
+        // Set hierarchical level for proper positioning
+        level: nodeLevels.get(node.id) || 0
+    })));
+
+    const edges = new vis.DataSet(graphData.edges.map(edge => ({
+        from: edge.from,
+        to: edge.to,
+        arrows: {
+            to: {
+                enabled: true,
+                scaleFactor: 1.2,
+                type: 'arrow'
+            }
+        },
+        color: getEdgeColor(edge.has_timer),
+        width: edge.has_timer ? 4 : 3,
+        dashes: edge.has_timer ? [8, 5] : false,
+        smooth: {
+            enabled: true,
+            type: 'cubicBezier',
+            roundness: 0.6
+        },
+        shadow: {
+            enabled: true,
+            color: edge.has_timer ? '#ff6b6b' : '#4ecdc4',
+            size: 8,
+            x: 0,
+            y: 0
+        },
+        label: edge.has_timer ? '⏰ TIMED' : '',
+        font: {
+            color: '#ffffff',
+            size: 10,
+            strokeWidth: 2,
+            strokeColor: '#000000',
+            background: edge.has_timer ? 'rgba(255, 107, 107, 0.8)' : 'rgba(78, 205, 196, 0.8)',
+            backgroundPadding: 4
+        }
+    })));
+
+    function getNodeColor(status) {
+        const baseColor = '#1a1a1a'; // Темно-черный цвет
+        switch(status) {
+            case 'solved': 
+                return {
+                    background: baseColor,
+                    border: '#00ff88', // Неоновый зеленый
+                    highlight: {
+                        background: '#2a2a2a',
+                        border: '#00ff88'
+                    }
+                };
+            case 'unlocked': 
+                return {
+                    background: baseColor,
+                    border: '#00d4ff', // Неоновый синий (цвет машинного масла)
+                    highlight: {
+                        background: '#2a2a2a',
+                        border: '#00d4ff'
+                    }
+                };
+            case 'locked': 
+                return {
+                    background: baseColor,
+                    border: '#ff4757', // Неоновый красный
+                    highlight: {
+                        background: '#2a2a2a',
+                        border: '#ff4757'
+                    }
+                };
+            default: 
+                return {
+                    background: baseColor,
+                    border: '#747d8c', // Серый
+                    highlight: {
+                        background: '#2a2a2a',
+                        border: '#747d8c'
+                    }
+                };
+        }
+    }
+
+    function getBorderColor(status) {
+        switch(status) {
+            case 'solved': return '#00ff88';
+            case 'unlocked': return '#00d4ff';
+            case 'locked': return '#ff4757';
+            default: return '#747d8c';
+        }
+    }
+
+    function getEdgeColor(hasTimer) {
+        if (hasTimer) {
+            return {
+                color: '#ff6b6b',
+                highlight: '#ff5252',
+                hover: '#ff8a80',
+                inherit: false
+            };
+        } else {
+            return {
+                color: '#4ecdc4',
+                highlight: '#26c6da',
+                hover: '#4dd0e1',
+                inherit: false
+            };
+        }
+    }
+
+    // Create network
+    const container = document.getElementById('graph-container');
+    const data = { nodes: nodes, edges: edges };
+    const options = {
+        layout: {
+            hierarchical: {
+                direction: 'UD',
+                sortMethod: 'directed',
+                shakeTowards: 'leaves',
+                levelSeparation: 150,
+                nodeSpacing: 180,
+                treeSpacing: 250,
+                blockShifting: true,
+                edgeMinimization: true,
+                parentCentralization: true,
+                improvedLayout: true
+            }
+        },
+        physics: {
+            enabled: true,
+            hierarchicalRepulsion: {
+                centralGravity: 0.0,
+                springLength: 150,
+                springConstant: 0.005,
+                nodeDistance: 200,
+                damping: 0.15,
+                avoidOverlap: 1
+            },
+            maxVelocity: 25,
+            minVelocity: 0.1,
+            solver: 'hierarchicalRepulsion',
+            stabilization: { 
+                iterations: 200,
+                updateInterval: 30,
+                fit: true
+            },
+            timestep: 0.5,
+            adaptiveTimestep: true
+        },
+        nodes: {
+            font: { 
+                size: 12,
+                face: 'Roboto, Arial, sans-serif',
+                color: '#ffffff',
+                strokeWidth: 2,
+                strokeColor: '#000000'
+            },
+            margin: 12,
+            widthConstraint: { 
+                minimum: 100,
+                maximum: 150 
+            },
+            heightConstraint: {
+                minimum: 50
+            },
+            borderWidth: 3,
+            borderWidthSelected: 4,
+            shapeProperties: {
+                borderRadius: 8
+            }
+        },
+        edges: {
+            smooth: {
+                enabled: true,
+                type: 'cubicBezier',
+                forceDirection: 'vertical',
+                roundness: 0.6
+            },
+            width: 3,
+            selectionWidth: 5,
+            hoverWidth: 4
+        },
+        interaction: {
+            hover: true,
+            selectConnectedEdges: false,
+            hoverConnectedEdges: true,
+            tooltipDelay: 300,
+            hideEdgesOnDrag: false,
+            hideNodesOnDrag: false,
+            dragNodes: false,
+            dragView: false,
+            zoomView: false,
+            navigationButtons: false,
+            keyboard: {
+                enabled: false
+            }
+        },
+        configure: {
+            enabled: false
+        }
+    };
+
+    const network = new vis.Network(container, data, options);
+
+    // Add loading animation
+    network.on('stabilizationProgress', function(params) {
+        const progress = Math.round((params.iterations / params.total) * 100);
+        if (progress < 100) {
+            container.style.opacity = '0.7';
+            container.style.filter = 'blur(1px)';
+        }
+    });
+
+    network.on('stabilizationIterationsDone', function() {
+        container.style.opacity = '1';
+        container.style.filter = 'none';
+        container.style.transition = 'all 0.5s ease';
+        
+        // Дополнительное выравнивание узлов на одном уровне
+        setTimeout(() => {
+            alignNodesOnSameLevel();
+            // Отключаем физику после стабилизации для фиксированных позиций
+            network.setOptions({ physics: { enabled: false } });
+        }, 100);
+    });
+
+    // Функция для выравнивания узлов на одном иерархическом уровне
+    function alignNodesOnSameLevel() {
+        const positions = network.getPositions();
+        const levelGroups = new Map();
+        
+        // Группируем узлы по уровням
+        graphData.nodes.forEach(node => {
+            const level = nodeLevels.get(node.id) || 0;
+            if (!levelGroups.has(level)) {
+                levelGroups.set(level, []);
+            }
+            levelGroups.get(level).push(node.id);
+        });
+        
+        // Выравниваем узлы на каждом уровне по Y-координате
+        const newPositions = {};
+        let hasChanges = false;
+        
+        levelGroups.forEach((nodeIds, level) => {
+            if (nodeIds.length > 1) {
+                // Находим среднюю Y-координату для узлов на этом уровне
+                const yCoords = nodeIds.map(id => positions[id].y);
+                const avgY = yCoords.reduce((sum, y) => sum + y, 0) / yCoords.length;
+                
+                // Устанавливаем одинаковую Y-координату для всех узлов уровня
+                nodeIds.forEach(id => {
+                    if (Math.abs(positions[id].y - avgY) > 10) { // Порог для выравнивания
+                        newPositions[id] = {
+                            x: positions[id].x,
+                            y: avgY
+                        };
+                        hasChanges = true;
+                    }
+                });
+            }
+        });
+        
+        // Применяем новые позиции если есть изменения
+        if (hasChanges) {
+            network.setPositions(newPositions);
+        }
+    }
+
+    // Add pulsing animation for available nodes
+    setInterval(function() {
+        const availableNodes = graphData.nodes.filter(n => n.status === 'unlocked');
+        availableNodes.forEach(node => {
+            const nodeElement = container.querySelector(`[data-id="${node.id}"]`);
+            if (nodeElement) {
+                nodeElement.style.animation = 'pulse 2s ease-in-out infinite';
+            }
+        });
+    }, 3000);
+
+    // Add click handler for nodes
+    network.on('click', function(params) {
+        console.log('Node clicked:', params);
+        if (params.nodes.length > 0) {
+            const nodeId = params.nodes[0];
+            const node = graphData.nodes.find(n => n.id === nodeId);
+            console.log('Found node:', node);
+            if (node && (node.status === 'unlocked' || node.status === 'solved')) {
+                console.log('Loading challenge modal for node:', nodeId);
+                // Load challenge in modal instead of redirecting
+                loadChallengeModal(nodeId);
+            } else {
+                console.log('Node not clickable or not found. Status:', node ? node.status : 'undefined');
+            }
+        }
+    });
+
+    // Add hover tooltips
+    network.on('hoverNode', function(params) {
+        const nodeId = params.node;
+        const node = graphData.nodes.find(n => n.id === nodeId);
+        if (node) {
+            network.canvas.body.container.title = `${node.label}\nCategory: ${node.category}\nValue: ${node.value} points\nStatus: ${node.status}`;
+        }
+    });
+
+    network.on('blurNode', function() {
+        network.canvas.body.container.title = '';
+    });
+});
+</script>
+
+<style>
+/* Modern Dark Theme with Neon Effects */
+@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap');
+
+body {
+    font-family: 'Roboto', sans-serif;
+}
+
+.vis-network {
+    outline: none;
+    border-radius: 12px;
+    overflow: hidden;
+    cursor: default !important;
+}
+
+.vis-network canvas {
+    cursor: default !important;
+}
+
+#graph-container {
+    background: linear-gradient(135deg, #0c0c0c 0%, #1a1a1a 50%, #0f0f0f 100%);
+    border: 2px solid #333;
+    border-radius: 12px;
+    box-shadow: 
+        0 0 20px rgba(0, 212, 255, 0.1),
+        inset 0 0 20px rgba(0, 0, 0, 0.5);
+    position: relative;
+    min-height: 800px;
+    height: 800px;
+}
+
+#graph-container::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: 
+        radial-gradient(circle at 20% 80%, rgba(0, 255, 136, 0.05) 0%, transparent 50%),
+        radial-gradient(circle at 80% 20%, rgba(0, 212, 255, 0.05) 0%, transparent 50%),
+        radial-gradient(circle at 40% 40%, rgba(255, 71, 87, 0.03) 0%, transparent 50%);
+    pointer-events: none;
+    border-radius: 12px;
+}
+
+.legend .badge {
+    margin-right: 12px;
+    padding: 8px 12px;
+    font-size: 11px;
+    font-weight: 500;
+    border-radius: 20px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.badge-success {
+    background: linear-gradient(45deg, #00ff88, #00cc6a) !important;
+    color: #000 !important;
+    box-shadow: 0 0 15px rgba(0, 255, 136, 0.4);
+}
+
+.badge-warning {
+    background: linear-gradient(45deg, #00d4ff, #0099cc) !important;
+    color: #000 !important;
+    box-shadow: 0 0 15px rgba(0, 212, 255, 0.4);
+}
+
+.badge-secondary {
+    background: linear-gradient(45deg, #747d8c, #57606f) !important;
+    color: #fff !important;
+}
+
+.badge-danger {
+    background: linear-gradient(45deg, #ff4757, #ff3742) !important;
+    color: #fff !important;
+    box-shadow: 0 0 15px rgba(255, 71, 87, 0.4);
+}
+
+.card {
+    margin-bottom: 20px;
+    background: linear-gradient(145deg, #1e1e1e, #2a2a2a);
+    border: 1px solid #333;
+    border-radius: 12px;
+    box-shadow: 
+        0 8px 32px rgba(0, 0, 0, 0.3),
+        0 0 0 1px rgba(255, 255, 255, 0.05);
+    overflow: hidden;
+}
+
+.card-header {
+    background: linear-gradient(90deg, #2c2c2c, #3a3a3a);
+    border-bottom: 1px solid #444;
+    color: #fff;
+    font-weight: 500;
+    position: relative;
+}
+
+.card-header::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, #00ff88, #00d4ff, #ff4757);
+    opacity: 0.6;
+}
+
+.card-body {
+    background: #1a1a1a;
+    color: #e0e0e0;
+}
+
+.progress {
+    height: 12px;
+    margin-top: 8px;
+    background: #333;
+    border-radius: 20px;
+    overflow: hidden;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.progress-bar {
+    background: linear-gradient(90deg, #00ff88, #00cc6a) !important;
+    box-shadow: 0 0 15px rgba(0, 255, 136, 0.5);
+    border-radius: 20px;
+    transition: all 0.3s ease;
+}
+
+.btn-outline-primary {
+    border: 2px solid #00d4ff;
+    color: #00d4ff;
+    background: transparent;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    transition: all 0.3s ease;
+    box-shadow: 0 0 10px rgba(0, 212, 255, 0.2);
+}
+
+.btn-outline-primary:hover {
+    background: #00d4ff;
+    color: #000;
+    box-shadow: 0 0 20px rgba(0, 212, 255, 0.6);
+    transform: translateY(-1px);
+}
+
+.jumbotron {
+    background: linear-gradient(135deg, #1a1a1a 0%, #2c2c2c 100%);
+    color: #fff;
+    border-radius: 0;
+    margin-bottom: 30px;
+    position: relative;
+    overflow: hidden;
+}
+
+.jumbotron::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: 
+        linear-gradient(45deg, transparent 30%, rgba(0, 212, 255, 0.1) 50%, transparent 70%);
+    animation: shimmer 3s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+    0%, 100% { opacity: 0; }
+    50% { opacity: 1; }
+}
+
+@keyframes pulse {
+    0%, 100% { 
+        box-shadow: 0 0 15px rgba(0, 212, 255, 0.4);
+        transform: scale(1);
+    }
+    50% { 
+        box-shadow: 0 0 25px rgba(0, 212, 255, 0.8);
+        transform: scale(1.02);
+    }
+}
+
+@keyframes glow {
+    0%, 100% {
+        filter: drop-shadow(0 0 5px rgba(0, 212, 255, 0.5));
+    }
+    50% {
+        filter: drop-shadow(0 0 15px rgba(0, 212, 255, 0.9));
+    }
+}
+
+.text-muted {
+    color: #888 !important;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #1a1a1a;
+}
+
+::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, #00d4ff, #00ff88);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(180deg, #00b8e6, #00e077);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    #graph-container {
+        height: 600px !important;
+        min-height: 600px !important;
+    }
+    
+    .legend .badge {
+        margin-bottom: 5px;
+        display: inline-block;
+    }
+}
+
+@media (max-width: 480px) {
+    #graph-container {
+        height: 500px !important;
+        min-height: 500px !important;
+    }
+}
+
+/* Challenge Modal Styles removed - using main challenges page instead */
+</style>
+{% endblock %}

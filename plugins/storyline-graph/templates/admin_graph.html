@@ -1,0 +1,144 @@
+{% extends "admin/base.html" %}
+
+{% block content %}
+<div class="jumbotron">
+    <div class="container">
+        <h1>Storyline Graph</h1>
+        <p>Manage challenge dependencies and view the complete storyline graph</p>
+    </div>
+</div>
+
+<div class="container">
+    <div class="row">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header">
+                    <h3>Challenge Graph Visualization</h3>
+                </div>
+                <div class="card-body">
+                    <div id="graph-container" style="height: 600px; border: 1px solid #ddd;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row mt-4">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header">
+                    <h3>Debug Information</h3>
+                </div>
+                <div class="card-body">
+                    <h5>Graph Data:</h5>
+                    <pre id="debug-info" style="background: #f8f9fa; padding: 15px; border-radius: 5px; max-height: 300px; overflow-y: auto;"></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Graph data from backend
+    const graphData = {{ graph_data | safe }};
+
+    // Display debug info
+    document.getElementById('debug-info').textContent = JSON.stringify(graphData, null, 2);
+
+    // Prepare data for vis.js
+    const nodes = new vis.DataSet(graphData.nodes.map(node => ({
+        id: node.id,
+        label: `${node.label}\n(${node.category})\n${node.value} pts`,
+        color: getNodeColor(node.status),
+        font: { color: '#333333', size: 12 },
+        shape: 'box',
+        margin: 10
+    })));
+
+    const edges = new vis.DataSet(graphData.edges.map(edge => ({
+        from: edge.from,
+        to: edge.to,
+        arrows: 'to',
+        color: edge.has_timer ? '#ff6b6b' : '#4ecdc4',
+        width: edge.has_timer ? 3 : 2,
+        label: edge.has_timer ? 'TIMED' : ''
+    })));
+
+    function getNodeColor(status) {
+        switch(status) {
+            case 'solved': return '#90EE90';
+            case 'unlocked': return '#FFE4B5';
+            case 'locked': return '#FFB6C1';
+            default: return '#E0E0E0';
+        }
+    }
+
+    // Create network
+    const container = document.getElementById('graph-container');
+    const data = { nodes: nodes, edges: edges };
+    const options = {
+        layout: {
+            hierarchical: {
+                direction: 'UD',
+                sortMethod: 'directed',
+                shakeTowards: 'roots'
+            }
+        },
+        physics: {
+            enabled: true,
+            hierarchicalRepulsion: {
+                centralGravity: 0.0,
+                springLength: 100,
+                springConstant: 0.01,
+                nodeDistance: 120,
+                damping: 0.09
+            },
+            maxVelocity: 50,
+            minVelocity: 0.1,
+            solver: 'hierarchicalRepulsion',
+            stabilization: { iterations: 100 }
+        },
+        nodes: {
+            font: { size: 12 },
+            margin: 10,
+            widthConstraint: { maximum: 150 }
+        },
+        edges: {
+            smooth: {
+                type: 'cubicBezier',
+                forceDirection: 'vertical',
+                roundness: 0.4
+            }
+        }
+    };
+
+    const network = new vis.Network(container, data, options);
+
+    // Add click handler for nodes
+    network.on('click', function(params) {
+        if (params.nodes.length > 0) {
+            const nodeId = params.nodes[0];
+            const node = graphData.nodes.find(n => n.id === nodeId);
+            if (node) {
+                alert(`Challenge: ${node.label}\nCategory: ${node.category}\nValue: ${node.value}\nStatus: ${node.status}`);
+            }
+        }
+    });
+});
+</script>
+
+<style>
+.vis-network {
+    outline: none;
+}
+
+#graph-container {
+    background: #fafafa;
+}
+
+.card {
+    margin-bottom: 20px;
+}
+</style>
+{% endblock %}

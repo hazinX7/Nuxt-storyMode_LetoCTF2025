@@ -1,0 +1,3 @@
+# No additional Python requirements beyond CTFd's base dependencies
+# The plugin uses only built-in CTFd functionality and standard libraries
+

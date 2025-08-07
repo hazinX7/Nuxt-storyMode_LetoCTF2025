@@ -1,0 +1,462 @@
+{% extends "admin/base.html" %}
+
+{% block scripts %}
+{{ super() }}
+<!-- Ensure jQuery is loaded -->
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"
+        crossorigin="anonymous"></script>
+{% endblock %}
+
+{% block content %}
+<div class="jumbotron">
+    <div class="container">
+        <h1>Storyline Challenge Management</h1>
+        <p>Configure challenge dependencies, time limits, and competition format</p>
+    </div>
+</div>
+
+<div class="container">
+    <!-- Competition Format Selector -->
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header">
+                    <h3>🏆 Competition Format</h3>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label for="competition-format">Select Competition Format:</label>
+                                <select id="competition-format" class="form-control">
+                                    <option value="jeopardy">Jeopardy (Standard CTF)</option>
+                                    <option value="hack_quest">Hack Quest (Storyline Graph)</option>
+                                </select>
+                                <small class="form-text text-muted">
+                                    This determines where the "Challenges" button redirects users
+                                </small>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="alert alert-info">
+                                <strong>Format Description:</strong>
+                                <ul class="mb-0 mt-2">
+                                    <li><strong>Jeopardy:</strong> Traditional CTF format with category-based challenges</li>
+                                    <li><strong>Hack Quest:</strong> Story-driven format with challenge dependencies</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                    <button type="button" id="save-format" class="btn btn-success">
+                        💾 Save Format
+                    </button>
+                    <div id="format-status" class="mt-2"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="row">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header">
+                    <h3>Challenge Dependencies</h3>
+                </div>
+                <div class="card-body">
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th>Challenge</th>
+                                <th>Category</th>
+                                <th>Prerequisite</th>
+                                <th>Time Limit (min)</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="challenges-table">
+                            <!-- Will be populated by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header">
+                    <h3>Edit Challenge</h3>
+                </div>
+                <div class="card-body">
+                    <form id="storyline-form">
+                        <div class="form-group">
+                            <label for="challenge-select">Challenge:</label>
+                            <select id="challenge-select" class="form-control">
+                                <option value="">Select a challenge...</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="predecessor-select">Prerequisite Challenge:</label>
+                            <select id="predecessor-select" class="form-control">
+                                <option value="">None (Root challenge)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="max-lifetime">Time Limit (minutes):</label>
+                            <input type="number" id="max-lifetime" class="form-control"
+                                   placeholder="Leave empty for no time limit" min="1">
+                            <small class="form-text text-muted">
+                                Time limit after prerequisite is solved
+                            </small>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Update</button>
+                        <button type="button" class="btn btn-secondary" onclick="clearForm()">Clear</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Modal -->
+<div class="modal fade" id="editModal" tabindex="-1" role="dialog">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Edit Storyline Settings</h5>
+                <button type="button" class="close" data-dismiss="modal">
+                    <span>&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Challenge:</label>
+                    <p id="modal-challenge-name" class="font-weight-bold"></p>
+                </div>
+                <div class="form-group">
+                    <label for="modal-predecessor">Prerequisite Challenge:</label>
+                    <select id="modal-predecessor" class="form-control">
+                        <option value="">None (Root challenge)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="modal-lifetime">Time Limit (minutes):</label>
+                    <input type="number" id="modal-lifetime" class="form-control"
+                           placeholder="No time limit" min="1">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="saveModalChanges()">Save Changes</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let challenges = [];
+let storylineChallenges = {};
+let currentEditingId = null;
+
+$(document).ready(function() {
+    loadChallenges();
+
+    $('#storyline-form').on('submit', function(e) {
+        e.preventDefault();
+        updateChallenge();
+    });
+
+    $('#challenge-select').on('change', function() {
+        const challengeId = $(this).val();
+        if (challengeId) {
+            loadChallengeData(parseInt(challengeId));
+        } else {
+            clearForm();
+        }
+    });
+});
+
+function loadChallenges() {
+    // Load all challenges
+    $.get('/api/v1/challenges', function(response) {
+        challenges = response.data || [];
+        populateSelects();
+        loadStorylineData();
+    });
+}
+
+function loadStorylineData() {
+    // Load storyline challenge configurations from API
+    $.get('/api/admin/storyline/challenges', function(response) {
+        storylineChallenges = response || {};
+        updateTable();
+    }).fail(function() {
+        console.warn('Failed to load storyline data');
+        updateTable();
+    });
+}
+
+function populateSelects() {
+    const challengeSelect = $('#challenge-select');
+    const predecessorSelect = $('#predecessor-select');
+    const modalPredecessor = $('#modal-predecessor');
+
+    challengeSelect.empty().append('<option value="">Select a challenge...</option>');
+    predecessorSelect.empty().append('<option value="">None (Root challenge)</option>');
+    modalPredecessor.empty().append('<option value="">None (Root challenge)</option>');
+
+    challenges.forEach(challenge => {
+        const option = `<option value="${challenge.id}">${challenge.name} (${challenge.category})</option>`;
+        challengeSelect.append(option);
+        predecessorSelect.append(option);
+        modalPredecessor.append(option);
+    });
+}
+
+function updateTable() {
+    const tbody = $('#challenges-table');
+    tbody.empty();
+
+    challenges.forEach(challenge => {
+        const storyline = storylineChallenges[challenge.id] || {};
+        const predecessor = storyline.predecessor_id ?
+            challenges.find(c => c.id === storyline.predecessor_id) : null;
+
+        const row = `
+            <tr>
+                <td>${challenge.name}</td>
+                <td>${challenge.category}</td>
+                <td>${predecessor ? predecessor.name : '<em>None</em>'}</td>
+                <td>${storyline.max_lifetime || '<em>No limit</em>'}</td>
+                <td>
+                    <button class="btn btn-sm btn-primary" onclick="editChallenge(${challenge.id})">
+                        Edit
+                    </button>
+                </td>
+            </tr>
+        `;
+        tbody.append(row);
+    });
+}
+
+function loadChallengeData(challengeId) {
+    const storyline = storylineChallenges[challengeId] || {};
+    $('#predecessor-select').val(storyline.predecessor_id || '');
+    $('#max-lifetime').val(storyline.max_lifetime || '');
+}
+
+function updateChallenge() {
+    const challengeId = $('#challenge-select').val();
+    if (!challengeId) {
+        alert('Please select a challenge');
+        return;
+    }
+
+    const predecessorId = $('#predecessor-select').val();
+    const maxLifetime = $('#max-lifetime').val();
+
+    // Prevent circular dependencies
+    if (predecessorId && checkCircularDependency(parseInt(challengeId), parseInt(predecessorId))) {
+        alert('This would create a circular dependency. Please choose a different prerequisite.');
+        return;
+    }
+
+    const data = {
+        predecessor_id: predecessorId ? parseInt(predecessorId) : null,
+        max_lifetime: maxLifetime ? parseInt(maxLifetime) : null
+    };
+
+    $.ajax({
+        url: `/api/admin/storyline/challenge/${challengeId}`,
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify(data),
+        success: function() {
+            // Update local data
+            storylineChallenges[challengeId] = data;
+            updateTable();
+
+            // Show success message
+            showAlert('Challenge updated successfully!', 'success');
+        },
+        error: function() {
+            showAlert('Failed to update challenge', 'danger');
+        }
+    });
+}
+
+function editChallenge(challengeId) {
+    currentEditingId = challengeId;
+    const challenge = challenges.find(c => c.id === challengeId);
+    const storyline = storylineChallenges[challengeId] || {};
+
+    $('#modal-challenge-name').text(challenge.name);
+    $('#modal-predecessor').val(storyline.predecessor_id || '');
+    $('#modal-lifetime').val(storyline.max_lifetime || '');
+
+    $('#editModal').modal('show');
+}
+
+function saveModalChanges() {
+    if (!currentEditingId) return;
+
+    const predecessorId = $('#modal-predecessor').val();
+    const maxLifetime = $('#modal-lifetime').val();
+
+    // Prevent circular dependencies
+    if (predecessorId && checkCircularDependency(currentEditingId, parseInt(predecessorId))) {
+        alert('This would create a circular dependency. Please choose a different prerequisite.');
+        return;
+    }
+
+    const data = {
+        predecessor_id: predecessorId ? parseInt(predecessorId) : null,
+        max_lifetime: maxLifetime ? parseInt(maxLifetime) : null
+    };
+
+    $.ajax({
+        url: `/api/admin/storyline/challenge/${currentEditingId}`,
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify(data),
+        success: function() {
+            storylineChallenges[currentEditingId] = data;
+            updateTable();
+            $('#editModal').modal('hide');
+            showAlert('Challenge updated successfully!', 'success');
+        },
+        error: function() {
+            showAlert('Failed to update challenge', 'danger');
+        }
+    });
+}
+
+function checkCircularDependency(challengeId, predecessorId) {
+    // Simple cycle detection
+    const visited = new Set();
+    let current = predecessorId;
+
+    while (current && !visited.has(current)) {
+        visited.add(current);
+        const storyline = storylineChallenges[current];
+        if (storyline && storyline.predecessor_id === challengeId) {
+            return true; // Found cycle
+        }
+        current = storyline ? storyline.predecessor_id : null;
+    }
+
+    return false;
+}
+
+function clearForm() {
+    $('#challenge-select').val('');
+    $('#predecessor-select').val('');
+    $('#max-lifetime').val('');
+}
+
+function showAlert(message, type) {
+    const alert = `
+        <div class="alert alert-${type} alert-dismissible fade show position-fixed"
+             style="top: 20px; right: 20px; z-index: 9999;">
+            ${message}
+            <button type="button" class="close" data-dismiss="alert">
+                <span>&times;</span>
+            </button>
+        </div>
+    `;
+    $('body').append(alert);
+
+    setTimeout(() => {
+        $('.alert').alert('close');
+    }, 3000);
+}
+
+// Competition Format Management
+function loadCompetitionFormat() {
+    $.get('/api/admin/storyline/competition-format')
+        .done(function(response) {
+            if (response.success) {
+                $('#competition-format').val(response.data.format || 'jeopardy');
+                updateFormatStatus('Current format loaded', 'info');
+            }
+        })
+        .fail(function() {
+            $('#competition-format').val('jeopardy');
+            updateFormatStatus('Using default format (Jeopardy)', 'warning');
+        });
+}
+
+function saveCompetitionFormat() {
+    const format = $('#competition-format').val();
+    
+    updateFormatStatus('Saving format...', 'info');
+    
+    $.ajax({
+        url: '/api/admin/storyline/competition-format',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({
+            format: format
+        }),
+        success: function(response) {
+            if (response.success) {
+                updateFormatStatus('Format saved successfully! 🎉', 'success');
+            } else {
+                updateFormatStatus('Failed to save format: ' + (response.message || 'Unknown error'), 'danger');
+            }
+        },
+        error: function() {
+            updateFormatStatus('Failed to save format', 'danger');
+        }
+    });
+}
+
+function updateFormatStatus(message, type) {
+    const alertClass = 'alert-' + type;
+    $('#format-status').html(
+        '<div class="alert ' + alertClass + ' alert-dismissible fade show" role="alert">' +
+        message +
+        '<button type="button" class="close" data-dismiss="alert" aria-label="Close">' +
+        '<span aria-hidden="true">&times;</span>' +
+        '</button>' +
+        '</div>'
+    );
+    
+    // Auto-hide success messages
+    if (type === 'success') {
+        setTimeout(function() {
+            $('#format-status .alert').fadeOut();
+        }, 3000);
+    }
+}
+
+// Event handlers for competition format
+$(document).ready(function() {
+    // Load current format on page load
+    loadCompetitionFormat();
+    
+    // Save format button click
+    $('#save-format').click(function() {
+        saveCompetitionFormat();
+    });
+    
+    // Format change handler
+    $('#competition-format').change(function() {
+        const format = $(this).val();
+        if (format === 'hack_quest') {
+            updateFormatStatus('Hack Quest format selected - users will see storyline graph', 'info');
+        } else {
+            updateFormatStatus('Jeopardy format selected - users will see standard challenges', 'info');
+        }
+    });
+});
+</script>
+
+<style>
+.table th, .table td {
+    vertical-align: middle;
+}
+
+.position-fixed {
+    z-index: 9999;
+}
+</style>
+{% endblock %}

@@ -1,0 +1,226 @@
+/* Storyline Graph Plugin Styles */
+
+.storyline-nav-link {
+    color: #007bff !important;
+    font-weight: 500;
+}
+
+.storyline-nav-link:hover {
+    color: #0056b3 !important;
+}
+
+.storyline-nav-link i {
+    margin-right: 5px;
+}
+
+/* Graph container styles */
+.graph-container {
+    border: 2px solid #dee2e6;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    position: relative;
+    overflow: hidden;
+}
+
+.graph-container::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background:
+        radial-gradient(circle at 20% 20%, rgba(0,123,255,0.1) 0%, transparent 50%),
+        radial-gradient(circle at 80% 80%, rgba(40,167,69,0.1) 0%, transparent 50%);
+    pointer-events: none;
+}
+
+/* Challenge status indicators */
+.challenge-status-solved {
+    background-color: #d4edda !important;
+    border-color: #c3e6cb !important;
+    color: #155724 !important;
+}
+
+.challenge-status-unlocked {
+    background-color: #fff3cd !important;
+    border-color: #ffeaa7 !important;
+    color: #856404 !important;
+}
+
+.challenge-status-locked {
+    background-color: #f8d7da !important;
+    border-color: #f5c6cb !important;
+    color: #721c24 !important;
+}
+
+/* Progress bar enhancements */
+.storyline-progress {
+    height: 12px;
+    background: linear-gradient(90deg, #e9ecef 0%, #dee2e6 100%);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.storyline-progress .progress-bar {
+    background: linear-gradient(90deg, #28a745 0%, #20c997 100%);
+    transition: width 0.6s ease;
+}
+
+/* Card enhancements */
+.storyline-card {
+    border: none;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.storyline-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+}
+
+.storyline-card .card-header {
+    background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+    color: white;
+    border-bottom: none;
+    font-weight: 600;
+}
+
+/* Legend styles */
+.storyline-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 15px;
+}
+
+.storyline-legend .badge {
+    padding: 8px 12px;
+    font-size: 0.85em;
+    border-radius: 15px;
+}
+
+/* Admin table styles */
+.storyline-admin-table {
+    background: white;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.storyline-admin-table thead th {
+    background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
+    color: white;
+    border: none;
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.85em;
+    letter-spacing: 0.5px;
+}
+
+.storyline-admin-table tbody tr:hover {
+    background-color: #f8f9fa;
+}
+
+/* Modal enhancements */
+.storyline-modal .modal-header {
+    background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+    color: white;
+    border-bottom: none;
+}
+
+.storyline-modal .modal-header .close {
+    color: white;
+    opacity: 0.8;
+}
+
+.storyline-modal .modal-header .close:hover {
+    opacity: 1;
+}
+
+/* Form enhancements */
+.storyline-form .form-control:focus {
+    border-color: #007bff;
+    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+}
+
+.storyline-form .btn-primary {
+    background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+    border: none;
+    font-weight: 500;
+    padding: 8px 20px;
+    transition: all 0.2s ease;
+}
+
+.storyline-form .btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0, 123, 255, 0.3);
+}
+
+/* Debug info styling */
+.storyline-debug {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 0.85em;
+    line-height: 1.4;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .storyline-legend {
+        justify-content: center;
+    }
+
+    .storyline-card {
+        margin-bottom: 20px;
+    }
+
+    .storyline-admin-table {
+        font-size: 0.9em;
+    }
+}
+
+/* Animation for graph loading */
+.graph-loading {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 400px;
+    color: #6c757d;
+}
+
+.graph-loading::before {
+    content: '⚡';
+    font-size: 2rem;
+    animation: pulse 1.5s infinite;
+    margin-right: 10px;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* Success/Error alerts positioning */
+.storyline-alert {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 9999;
+    min-width: 300px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    border: none;
+    border-radius: 8px;
+}
+
+.storyline-alert.alert-success {
+    background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+    color: #155724;
+}
+
+.storyline-alert.alert-danger {
+    background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%);
+    color: #721c24;
+}
